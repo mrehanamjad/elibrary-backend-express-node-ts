@@ -6,7 +6,11 @@ import { User } from "./userTypes";
 import { sign } from "jsonwebtoken";
 import { config } from "../config/config";
 
-const createUser = async (req: Request, res: Response, next: NextFunction) => {
+const registerUser = async (
+    req: Request,
+    res: Response,
+    next: NextFunction
+) => {
     // steps:
     // 1. validation
     // 2. Process (logic)
@@ -60,4 +64,29 @@ const createUser = async (req: Request, res: Response, next: NextFunction) => {
     }
 };
 
-export { createUser };
+const loginUser = async (req: Request, res: Response, next: NextFunction) => {
+    const { email, password } = req.body;
+
+    if (!email || !password) {
+        return next(createHttpError(400, "All fields are required"));
+    }
+
+    const user = await userModel.findOne({ email });
+    if (!user) {
+        return next(createHttpError(404, "User not found with this email!"));
+    }
+
+    const isMatch = await bcrypt.compare(password, user.password);
+    if (!isMatch) {
+        return next(createHttpError(400, "Password incorrect!"));
+    }
+
+    const token = sign({ sub: user._id }, config.jwtSecret, {
+        expiresIn: "7d",
+        algorithm: "HS256",
+    });
+
+    res.json({ accessToken: token });
+};
+
+export { registerUser, loginUser };
