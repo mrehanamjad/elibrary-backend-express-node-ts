@@ -206,15 +206,19 @@ const listBooks = async (req: Request, res: Response, next: NextFunction) => {
     } catch (error) {
         return next(createHttpError(500, "Error while getting books"));
     }
-}
+};
 
-const getSingleBook = async (req: Request, res: Response, next: NextFunction) => {
-    
+const getSingleBook = async (
+    req: Request,
+    res: Response,
+    next: NextFunction
+) => {
     try {
-
         const bookId = req.params.bookId;
 
-        const book = await bookModel.findOne({ _id: bookId }).populate("author", "name");
+        const book = await bookModel
+            .findOne({ _id: bookId })
+            .populate("author", "name");
 
         if (!book) {
             return next(createHttpError(404, "Book not found"));
@@ -224,6 +228,50 @@ const getSingleBook = async (req: Request, res: Response, next: NextFunction) =>
     } catch (error) {
         return next(createHttpError(500, "Error while getting a book"));
     }
-}
+};
 
-export { createBook, updateBook, listBooks, getSingleBook };
+const deleteBook = async (req: Request, res: Response, next: NextFunction) => {
+    const bookId = req.params.bookId;
+
+    try {
+        const book = await bookModel.findOne({ _id: bookId });
+
+        if (!book) {
+            return next(createHttpError(404, "Book not found"));
+        }
+
+        const _req = req as AuthRequest;
+        if (book.author.toString() !== _req.userId) {
+            return next(
+                createHttpError(
+                    403,
+                    "You are not authorized to update this book"
+                )
+            );
+        }
+
+        const coverImageUrlSplits = book.coverImage.split("/");
+        const coverImageCloudinaryPublicId =
+            coverImageUrlSplits.at(-2) +
+            "/" +
+            coverImageUrlSplits.at(-1)?.split(".").at(-1);
+
+        const fileUrlSplits = book.file.split("/");
+        const fileCloaudinaryPublicId =
+            fileUrlSplits.at(-2) + "/" + fileUrlSplits.at(-1);
+
+        await cloudinary.uploader.destroy(coverImageCloudinaryPublicId);
+        await cloudinary.uploader.destroy(fileCloaudinaryPublicId, {
+            resource_type: "row",
+        });
+
+        await bookModel.deleteOne({_id: bookId})
+
+         res.sendStatus(203)
+
+    } catch (error) {
+        return next(createHttpError(500, "Error while deteling the book!"));
+    }
+};
+
+export { createBook, updateBook, listBooks, getSingleBook, deleteBook };
