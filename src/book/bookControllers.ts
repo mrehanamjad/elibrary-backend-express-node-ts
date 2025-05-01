@@ -65,7 +65,7 @@ const createBook = async (req: Request, res: Response, next: NextFunction) => {
                 title,
                 genre,
                 description,
-                author: "6812c94253d987966ed4f8b8",
+                author: "68134f28ecdca76f1d55417e",
                 coverImage: uploadResult.secure_url,
                 file: bookFileUploadResult.secure_url,
             });
@@ -82,7 +82,7 @@ const createBook = async (req: Request, res: Response, next: NextFunction) => {
         }
 
         res.status(201).json({
-            message: "Book created successfully",
+            message: "Book uploaded successfully",
         });
     } catch (error) {
         console.log(error);
