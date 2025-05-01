@@ -6,60 +6,122 @@ import bookModel from "./bookModel";
 import fs from "fs";
 import { AuthRequest } from "../middlewares/authenticate";
 
+const uploadCoverImageToCloudinary = async (image: Express.Multer.File) => {
+    const coverImageMineType = image.mimetype.split("/").at(-1);
+    const fileName = image.filename;
+    const filePath = path.resolve(
+        __dirname,
+        "../../public/data/uploads",
+        fileName
+    );
+
+    try {
+        const uploadResult = await cloudinary.uploader.upload(filePath, {
+            filename_override: fileName,
+            folder: "book-covers",
+            format: coverImageMineType,
+        });
+
+        console.log("Image upload result:", uploadResult);
+        return uploadResult.secure_url;
+    } catch (error) {
+        console.error("Error uploading cover image to Cloudinary:", error);
+        throw createHttpError(500, "Failed to upload cover image");
+    } finally {
+        try {
+            await fs.promises.unlink(filePath);
+        } catch (err) {
+            console.warn("Failed to delete temporary cover image:", err);
+        }
+    }
+};
+
+const uploadBookFileToCloudinary = async (file: Express.Multer.File) => {
+    const fileName = file.filename;
+    const filePath = path.resolve(
+        __dirname,
+        "../../public/data/uploads",
+        fileName
+    );
+
+    try {
+        const uploadResult = await cloudinary.uploader.upload(filePath, {
+            resource_type: "raw",
+            filename_override: fileName,
+            folder: "book-files",
+            format: "pdf",
+        });
+
+        console.log("Book upload result:", uploadResult);
+        return uploadResult.secure_url;
+    } catch (error) {
+        console.error("Error uploading book file to Cloudinary:", error);
+        throw createHttpError(500, "Failed to upload book pdf file");
+    } finally {
+        try {
+            await fs.promises.unlink(filePath);
+        } catch (err) {
+            console.warn("Failed to delete temporary book file:", err);
+        }
+    }
+};
+
+const deleteCoverImageFromCloudinary = async (imageUrl: string) => {
+    try {
+        const coverImageUrlSplits = imageUrl.split("/");
+        const coverImageCloudinaryPublicId =
+            coverImageUrlSplits.at(-2) +
+            "/" +
+            coverImageUrlSplits.at(-1)?.split(".").at(0);
+        await cloudinary.uploader.destroy(coverImageCloudinaryPublicId);
+    } catch (error) {
+        console.error("Error deleting cover image from Cloudinary:", error);
+        return createHttpError(
+            500,
+            "Failed to delete cover image from Cloudinary"
+        );
+    }
+};
+
+const deleteBookFileFromCloudinary = async (fileUrl: string) => {
+    try {
+        const fileUrlSplits = fileUrl.split("/");
+        const fileCloudinaryPublicId =
+            fileUrlSplits.at(-2) + "/" + fileUrlSplits.at(-1)?.split(".").at(0);
+        await cloudinary.uploader.destroy(fileCloudinaryPublicId, {
+            resource_type: "raw",
+        });
+    } catch (error) {
+        console.error("Error deleting book file from Cloudinary:", error);
+        return createHttpError(
+            500,
+            "Failed to delete book pdf file from Cloudinary"
+        );
+    }
+};
+
 const createBook = async (req: Request, res: Response, next: NextFunction) => {
     const { title, genre, description } = req.body;
 
     if (!title || !genre || !description) {
         return next(
-            createHttpError(400, "Title, genre and description are required")
+            createHttpError(400, "Title, genre, and description are required")
+        );
+    }
+
+    const files = req.files as { [fieldname: string]: Express.Multer.File[] };
+
+    if (!files?.coverImage?.[0] || !files?.file?.[0]) {
+        return next(
+            createHttpError(400, "Cover image and book file are required")
         );
     }
 
     try {
-        const files = req.files as {
-            [fieldname: string]: Express.Multer.File[];
-        };
-
-        if (!files.coverImage || !files.file) {
-            return next(
-                createHttpError(400, "Cover image and file are required")
-            );
-        }
-
-        const coverImageMineType = files.coverImage[0].mimetype
-            .split("/")
-            .at(-1);
-        const fileName = files.coverImage[0].filename;
-        const filePath = path.resolve(
-            __dirname,
-            "../../public/data/uploads",
-            fileName
+        const coverImageUrl = await uploadCoverImageToCloudinary(
+            files.coverImage[0]
         );
-
-        const uploadResult = await cloudinary.uploader.upload(filePath, {
-            filename_override: fileName,
-            folder: "book-covers",
-            formate: coverImageMineType,
-        });
-
-        const bookFileName = files.file[0].filename;
-        const bookFilePath = path.resolve(
-            __dirname,
-            "../../public/data/uploads",
-            bookFileName
-        );
-
-        const bookFileUploadResult = await cloudinary.uploader.upload(
-            bookFilePath,
-            {
-                resource_type: "raw",
-                filename_override: bookFileName,
-                folder: "book-files",
-                format: "pdf",
-            }
-        );
-        console.log("image upload result", uploadResult);
-        console.log("book upload result", bookFileUploadResult);
+        const bookFileUrl = await uploadBookFileToCloudinary(files.file[0]);
 
         const _req = req as AuthRequest;
 
@@ -69,30 +131,21 @@ const createBook = async (req: Request, res: Response, next: NextFunction) => {
                 genre,
                 description,
                 author: _req.userId,
-                coverImage: uploadResult.secure_url,
-                file: bookFileUploadResult.secure_url,
+                coverImage: coverImageUrl,
+                file: bookFileUrl,
             });
         } catch (error) {
-            console.log(error);
             return next(createHttpError(500, "Error creating book"));
-        }
-
-        try {
-            await fs.promises.unlink(filePath);
-            await fs.promises.unlink(bookFilePath);
-        } catch (error) {
-            console.log("Error deleting files", error);
         }
 
         res.status(201).json({
             message: "Book uploaded successfully",
         });
     } catch (error) {
-        console.log(error);
-        return next(createHttpError(500, "Error uploading files"));
+        console.error("Error in createBook:", error);
+        return next(error);
     }
 };
-
 const updateBook = async (req: Request, res: Response, next: NextFunction) => {
     const { title, genre, description } = req.body;
 
@@ -125,54 +178,22 @@ const updateBook = async (req: Request, res: Response, next: NextFunction) => {
     let completeCoverImage = "";
     if (files.coverImage) {
         try {
-            const fileName = files.coverImage[0].filename;
-            const filePath = path.resolve(
-                __dirname,
-                "../../public/data/uploads",
-                fileName
+            await deleteCoverImageFromCloudinary(book.coverImage);
+            completeCoverImage = await uploadCoverImageToCloudinary(
+                files.coverImage[0]
             );
-            const coverImageMineType = files.coverImage[0].mimetype
-                .split("/")
-                .at(-1);
-            completeCoverImage = fileName;
-            const uploadResult = await cloudinary.uploader.upload(filePath, {
-                filename_override: fileName,
-                folder: "book-covers",
-                formate: coverImageMineType,
-            });
-
-            completeCoverImage = uploadResult.secure_url;
-            await fs.promises.unlink(filePath);
         } catch (error) {
-            return next(createHttpError(500, "Error uploading cover image"));
+            return next(error);
         }
     }
 
     let completeFile = "";
     if (files.file) {
         try {
-            const bookFileName = files.file[0].filename;
-            const bookFilePath = path.resolve(
-                __dirname,
-                "../../public/data/uploads",
-                bookFileName
-            );
-            completeFile = bookFileName;
-
-            const bookFileUploadResult = await cloudinary.uploader.upload(
-                bookFilePath,
-                {
-                    resource_type: "raw",
-                    filename_override: bookFileName,
-                    folder: "book-files",
-                    format: "pdf",
-                }
-            );
-
-            completeFile = bookFileUploadResult.secure_url;
-            await fs.promises.unlink(bookFilePath);
+            await deleteBookFileFromCloudinary(book.file);
+            completeFile = await uploadBookFileToCloudinary(files.file[0]);
         } catch (error) {
-            return next(createHttpError(500, "Error uploading book pdf"));
+            return next(error);
         }
     }
 
@@ -250,26 +271,8 @@ const deleteBook = async (req: Request, res: Response, next: NextFunction) => {
             );
         }
 
-        const coverImageUrlSplits = book.coverImage.split("/");
-        const coverImageCloudinaryPublicId =
-            coverImageUrlSplits.at(-2) +
-            "/" +
-            coverImageUrlSplits.at(-1)?.split(".").at(0);
-
-        const fileUrlSplits = book.file.split("/");
-        const fileCloaudinaryPublicId =
-            fileUrlSplits.at(-2) + "/" + fileUrlSplits.at(-1);
-
-        try {
-            await cloudinary.uploader.destroy(coverImageCloudinaryPublicId);
-
-            await cloudinary.uploader.destroy(fileCloaudinaryPublicId, {
-                resource_type: "raw",
-            });
-        } catch (error) {
-            console.error("Cloudinary deletion failed:", error);
-            return next(createHttpError(500, "Failed to delete media files"));
-        }
+        await deleteCoverImageFromCloudinary(book.coverImage);
+        await deleteBookFileFromCloudinary(book.file);
 
         await bookModel.deleteOne({ _id: bookId });
 
