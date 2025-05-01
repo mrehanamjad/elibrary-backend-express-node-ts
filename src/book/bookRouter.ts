@@ -8,8 +8,8 @@ const bookRouter = express.Router();
 // multer working:
 // store in local file  --> push to cloudinary --> delete from local
 const uplaod = multer({
-    dest: path.resolve(__dirname, "../../public/data/uplaod"),
-    limits: { fieldSize: 3e7 }, // 3e7 = 30mb = 30 * 1024 * 1024
+    dest: path.resolve(__dirname, "../../public/data/uploads"),
+    limits: { fileSize: 10 * 1024 * 1024 }, // 10 MB
 });
 
 bookRouter.post(
