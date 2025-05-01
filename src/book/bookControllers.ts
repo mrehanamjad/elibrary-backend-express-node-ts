@@ -254,21 +254,26 @@ const deleteBook = async (req: Request, res: Response, next: NextFunction) => {
         const coverImageCloudinaryPublicId =
             coverImageUrlSplits.at(-2) +
             "/" +
-            coverImageUrlSplits.at(-1)?.split(".").at(-1);
+            coverImageUrlSplits.at(-1)?.split(".").at(0);
 
         const fileUrlSplits = book.file.split("/");
         const fileCloaudinaryPublicId =
             fileUrlSplits.at(-2) + "/" + fileUrlSplits.at(-1);
 
-        await cloudinary.uploader.destroy(coverImageCloudinaryPublicId);
-        await cloudinary.uploader.destroy(fileCloaudinaryPublicId, {
-            resource_type: "row",
-        });
+        try {
+            await cloudinary.uploader.destroy(coverImageCloudinaryPublicId);
 
-        await bookModel.deleteOne({_id: bookId})
+            await cloudinary.uploader.destroy(fileCloaudinaryPublicId, {
+                resource_type: "raw",
+            });
+        } catch (error) {
+            console.error("Cloudinary deletion failed:", error);
+            return next(createHttpError(500, "Failed to delete media files"));
+        }
 
-         res.sendStatus(203)
+        await bookModel.deleteOne({ _id: bookId });
 
+        res.sendStatus(204);
     } catch (error) {
         return next(createHttpError(500, "Error while deteling the book!"));
     }
